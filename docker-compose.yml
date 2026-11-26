@@ -1,0 +1,91 @@
+# Docker Compose file for the Containerized 3-Tier Application.
+#
+# Services:
+#   db       - PostgreSQL database (persistent named volume)
+#   backend  - FastAPI API (non-root user)
+#   frontend - Nginx serving static UI, proxying /api to backend
+#
+# A bridge network (app-network) lets containers talk to each other by
+# service name. Environment variables come from .env (see .env.example).
+
+services:
+  # ------------------------------------------------------------
+  # Database tier: PostgreSQL
+  # ------------------------------------------------------------
+  db:
+    image: postgres:15-alpine
+    container_name: taskmanager_db
+    environment:
+      POSTGRES_DB: ${DB_NAME:-taskdb}
+      POSTGRES_USER: ${DB_USER:-taskuser}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-taskpass}
+    volumes:
+      # Named volume keeps data across container restarts/recreations.
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-taskuser} -d ${DB_NAME:-taskdb}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - app-network
+
+  # ------------------------------------------------------------
+  # Backend tier: FastAPI + uvicorn
+  # ------------------------------------------------------------
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    container_name: taskmanager_backend
+    environment:
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_NAME: ${DB_NAME:-taskdb}
+      DB_USER: ${DB_USER:-taskuser}
+      DB_PASSWORD: ${DB_PASSWORD:-taskpass}
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    networks:
+      - app-network
+
+  # ------------------------------------------------------------
+  # Frontend tier: Nginx static site + API proxy
+  # ------------------------------------------------------------
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: taskmanager_frontend
+    ports:
+      - "8088:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:80/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5s
+    networks:
+      - app-network
+
+# ------------------------------------------------------------
+# Networking & volumes
+# ------------------------------------------------------------
+networks:
+  app-network:
+    driver: bridge
+
+volumes:
+  postgres_data:
+    driver: local

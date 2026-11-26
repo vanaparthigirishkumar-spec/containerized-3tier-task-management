@@ -1,0 +1,37 @@
+# Bytecode / compiled Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+*.egg
+.dist-info/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Environment files (never commit real credentials)
+.env
+.env.local
+
+# Test artefacts
+test.db
+*.backup
+.coverage
+htmlcov/
+.pytest_cache/
+.tox/
+
+# Logs collected by scripts
+logs_*/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
