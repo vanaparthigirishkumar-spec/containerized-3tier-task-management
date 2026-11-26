@@ -19,6 +19,7 @@ Users can create, view, update, and delete tasks. Task data is stored permanentl
 - [Configuration (.env)](#configuration-env)
 - [Automated Testing](#automated-testing)
 - [Seven Bash Scripts](#seven-bash-scripts)
+- [GitHub Actions](#github-actions)
 - [Jenkins CI/CD Pipeline](#jenkins-cicd-pipeline)
 - [Troubleshooting Guide](#troubleshooting-guide)
 - [Common Interview Questions and Answers](#common-interview-questions-and-answers)
@@ -233,23 +234,26 @@ This copies `.env.example` to `.env` if missing, builds the images, and starts a
 
 ---
 
-### ⚠️ Current status: Docker build and live deployment are pending
+### Verified deployment status
 
-When this project was validated in the current environment, `docker compose build` could not complete because Docker was unable to resolve `registry-1.docker.io` (Docker Hub DNS lookup failed). The required base images (`python:3.11-slim`, `nginx:alpine`, `postgres:15-alpine`) are not present locally.
+The initial validation attempt was blocked by a transient Docker Hub DNS failure. Connectivity was later restored, and the full stack has since been built, started and verified:
 
-As a result:
-- Docker images have **not** been built.
-- The three-tier application has **not** been started with Docker Compose.
-- Live verification (frontend on 8088, backend through Nginx proxy, PostgreSQL connectivity, end-to-end CRUD over HTTP) has **not** been performed.
-- PostgreSQL integration has **not** been verified in a running container.
+- Base images `python:3.11-slim`, `nginx:alpine` and `postgres:15-alpine` were pulled.
+- Both application images were built with `docker compose build`.
+- All three containers run and report **healthy** via Docker health checks.
+- Frontend is reachable on `http://localhost:8088`, and the API through the Nginx proxy at `http://localhost:8088/api/health`.
+- Backend-to-PostgreSQL connectivity was verified with a live SQL query (PostgreSQL 15.20, `tasks` table).
+- Full CRUD was exercised through the proxy: create → read → update → delete → 404 after delete.
 
-To complete deployment once network access to Docker Hub is available:
+The persistent data lives in the named volume `containerized-3tier-app_postgres_data` and is preserved across restarts.
 
-```bash
-docker compose build
-./scripts/start.sh
-./scripts/health-check.sh
-```
+### GitHub repository
+
+The source is published publicly at:
+
+`https://github.com/vanaparthigirishkumar-spec/containerized-3tier-task-management`
+
+See [GitHub Actions](#github-actions) and [Jenkins CI/CD Pipeline](#jenkins-cicd-pipeline) for the CI/CD setup.
 
 ## Docker Compose Commands
 
@@ -354,7 +358,7 @@ pytest tests -v
 ### Important testing notes
 
 - The 10 automated tests ran **against an in-memory SQLite database**, not against PostgreSQL. This keeps tests fast and self-contained without requiring a live database server.
-- **PostgreSQL integration has not been verified in a running container**, because the Docker build/deployment is pending (see status note above).
+- PostgreSQL integration **was separately verified in a running container** with a live SQL query and end-to-end CRUD over the Nginx proxy (see [Verified deployment status](#verified-deployment-status)).
 - Tests exercise the full FastAPI + SQLAlchemy stack and the real CRUD route handlers, just with SQLite as the backing store.
 
 ## Seven Bash Scripts
@@ -372,10 +376,10 @@ Restarts application services in place with `docker compose restart`. Persistent
 
 ### 4. `health-check.sh`
 Checks container status (`docker compose ps`) and pings two HTTP endpoints:
-- Backend API: `http://localhost:8000/api/health`
 - Frontend: `http://localhost:8088/`
+- Backend API through the Nginx proxy: `http://localhost:8088/api/health`
 
-Reports `[OK]` or `[FAIL]` for each.
+Port 8000 is internal to the Docker network, so the backend is checked through the proxy. Reports `[OK]` or `[FAIL]` for each.
 
 ### 5. `collect-logs.sh`
 Saves timestamped logs for all services (`frontend`, `backend`, `db`) into a folder named `logs_YYYYMMDD_HHMMSS/`, plus a `ps.log` snapshot of container state.
@@ -386,26 +390,63 @@ Safely cleans up project containers and resources. By default it **only** remove
 ### 7. `troubleshoot.sh`
 Displays Docker version/compose version, container status, Docker networks, recent logs (tail 50) for each service, HTTP endpoint health checks, and common troubleshooting tips.
 
+## GitHub Actions
+
+The workflow lives at `.github/workflows/ci.yml`.
+
+[![CI](https://github.com/vanaparthigirishkumar-spec/containerized-3tier-task-management/actions/workflows/ci.yml/badge.svg)](https://github.com/vanaparthigirishkumar-spec/containerized-3tier-task-management/actions/workflows/ci.yml)
+
+- **Triggers:** push to `main` and pull requests targeting `main`.
+- **Permissions:** `contents: read` only.
+- **Steps:** checkout → set up Python 3.11 → install backend + test dependencies → pytest (with JUnit XML) → publish test results → validate Compose → build backend image → build frontend image.
+- Uses current official actions (`actions/checkout@v7`, `actions/setup-python@v7`, `actions/upload-artifact@v7`).
+- No deployment is performed.
+
+A real workflow run completed successfully:
+`https://github.com/vanaparthigirishkumar-spec/containerized-3tier-task-management/actions/runs/45808370417`
+
 ## Jenkins CI/CD Pipeline
 
-A declarative `Jenkinsfile` is provided with five stages:
+Jenkins runs locally on **http://localhost:8081** (port 8080 was occupied by a container from another project). It is bound to `127.0.0.1` only and is not publicly exposed.
 
-1. **Checkout source code** — `checkout scm`
-2. **Install Python dependencies** — installs `backend/requirements.txt` and `tests/requirements.txt`
-3. **Run backend tests** — runs `pytest tests -v` (against SQLite)
-4. **Validate Docker Compose configuration** — runs `docker compose config --quiet`
-5. **Build Docker images** — runs `docker compose build`
+### Jenkins architecture
 
-### Jenkins requirements and permissions
+The Jenkins infrastructure is separate from the application `docker-compose.yml`:
 
-- The Jenkins agent must have **Docker installed** and the Jenkins user must be able to run Docker commands (e.g., the `jenkins` user added to the `docker` group, or the Docker socket mounted / rootless Docker configured).
-- **Python 3 and pip** must be installed on the agent.
-- The Jenkins workspace needs write access to install Python packages and to create/remove test artefacts (e.g., `test.db`).
-- No cloud deployment is performed by this pipeline; it only builds images locally on the agent.
+- `jenkins/Dockerfile` — Jenkins LTS with JDK 21, Python 3 venv, Docker CLI and Compose plugin, and the required plugins.
+- `jenkins/docker-compose.yml` — two services: `jenkins` and `docker` (Docker-in-Docker with TLS).
+- `jenkins/plugins.txt` — `workflow-aggregator`, `git`, `github`, `docker-workflow`, `junit`, `pipeline-stage-view`.
+- The host Docker socket is **never** mounted; Jenkins builds use the isolated DinD daemon over TLS (`tcp://docker:2376`).
+- Persistent storage uses dedicated named volumes for Jenkins home, DinD certificates and DinD data.
+
+Start it with:
+
+```bash
+cd jenkins
+JENKINS_HTTP_PORT=8081 docker compose up -d
+```
+
+See `jenkins/README.md` for the one-time administrator setup steps.
+
+### Declarative pipeline stages
+
+The `Jenkinsfile` has five stages:
+
+1. **Checkout source code** — `checkout scm` from the GitHub `main` branch
+2. **Install Python dependencies** — `backend/requirements.txt` and `tests/requirements.txt`
+3. **Run backend tests** — `python -m pytest tests -v` (against SQLite)
+4. **Validate Docker Compose configuration** — `docker compose config --quiet`
+5. **Build Docker images** — `docker compose build` (backend and frontend)
+
+The Pipeline job is named `containerized-3tier-task-management` and uses the Jenkinsfile from SCM (`*/main`). It is triggered manually.
 
 ### Jenkins pipeline status
 
-**The Jenkins pipeline has NOT been executed.** No Jenkins server is configured in this environment. Per project rules, this pipeline is not claimed to have run successfully unless it has actually been executed in a configured Jenkins environment.
+A real Jenkins build (**build #3**) completed with final status **SUCCESS**:
+
+- Checkout ✓, Install dependencies ✓, pytest ✓ (`10 passed`), Compose validation ✓, backend and frontend image builds ✓.
+
+The bootstrap scripts used to create the job and trigger builds are in `jenkins/init.groovy.d/`. No administrator password or API token is hardcoded.
 
 ## Troubleshooting Guide
 
@@ -455,11 +496,12 @@ Read-only diagnostic scripts you can run safely at any time:
 
 ### Q: Did you verify PostgreSQL integration and Jenkins execution?
 
-**A:** No. Docker image building and live deployment are pending because Docker could not resolve Docker Hub (`registry-1.docker.io` DNS failure) in the validation environment. Therefore:
-- The three-tier stack was not started.
-- PostgreSQL integration in a running container was not verified.
-- The Jenkins pipeline was not executed.
-- The 10 automated tests ran against an in-memory SQLite database, not PostgreSQL.
+**A:** Yes. The initial Docker Hub DNS failure was transient and later resolved. After that:
+- The three-tier stack was started and all containers report healthy.
+- PostgreSQL integration was verified in the running container with a live SQL query and end-to-end CRUD over the proxy.
+- Jenkins was installed locally with an isolated Docker-in-Docker TLS builder, and a real pipeline build completed with SUCCESS.
+- GitHub Actions also ran successfully on the published repository.
+- The 10 automated tests still run against in-memory SQLite (by design, for speed and self-containment); PostgreSQL was validated separately at runtime.
 
 ---
 
