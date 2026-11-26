@@ -1,0 +1,9 @@
+# Required Jenkins plugins (one plugin ID per line).
+# Versions are resolved by jenkins-plugin-cli as the latest compatible with
+# this Jenkins LTS image at build time.
+workflow-aggregator
+git
+github
+docker-workflow
+junit
+pipeline-stage-view

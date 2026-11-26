@@ -51,9 +51,8 @@ pipeline {
         stage('Run backend tests') {
             steps {
                 echo 'Running backend tests with pytest...'
-                dir('backend') {
-                    sh 'pytest tests -v'
-                }
+                // tests/ is at the repository root (not under backend/)
+                sh 'python -m pytest tests -v'
             }
         }
 
