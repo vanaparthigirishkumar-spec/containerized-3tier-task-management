@@ -1,0 +1,62 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Minimum permissions needed: read the source code only.
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11 (matches backend Docker runtime)
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+
+      - name: Install backend and testing dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r backend/requirements.txt -r tests/requirements.txt
+
+      - name: Run pytest
+        run: |
+          mkdir -p test-results
+          python -m pytest tests -v --junitxml=test-results/junit.xml
+
+      - name: Publish test results
+        if: always()
+        run: |
+          echo "### Test results" >> "$GITHUB_STEP_SUMMARY"
+          if [ -f test-results/junit.xml ]; then
+            python -c "import xml.etree.ElementTree as ET; s = ET.parse('test-results/junit.xml').getroot().find('testsuite'); print('Tests: ' + s.get('tests') + ', Failures: ' + s.get('failures') + ', Errors: ' + s.get('errors') + ', Skipped: ' + s.get('skipped'))" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "No JUnit report was generated (pytest did not run)." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload test results artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pytest-junit-results
+          path: test-results/junit.xml
+          if-no-files-found: warn
+
+      - name: Validate Docker Compose configuration
+        run: docker compose config --quiet
+
+      - name: Build backend Docker image
+        run: docker build -f Dockerfile.backend -t taskmanagement-backend:ci .
+
+      - name: Build frontend Docker image
+        run: docker build -f frontend/Dockerfile -t taskmanagement-frontend:ci frontend

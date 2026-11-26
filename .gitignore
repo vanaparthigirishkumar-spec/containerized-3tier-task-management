@@ -17,6 +17,7 @@ env/
 
 # Test artefacts
 test.db
+test-results/
 *.backup
 .coverage
 htmlcov/
