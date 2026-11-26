@@ -20,7 +20,8 @@ USER root
 RUN apt-get update && apt-get install -y --no-install-recommends \
         python3 python3-pip python3-venv \
     && rm -rf /var/lib/apt/lists/* \
-    && python3 -m venv /opt/venv
+    && python3 -m venv /opt/venv \
+    && chown -R jenkins:jenkins /opt/venv
 ENV PATH="/opt/venv/bin:${PATH}"
 
 COPY --from=docker-cli /usr/local/bin/docker /usr/local/bin/docker

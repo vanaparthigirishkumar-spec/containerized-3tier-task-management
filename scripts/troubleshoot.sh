@@ -48,8 +48,8 @@ docker compose logs --tail=50 db 2>/dev/null || echo "  (db logs unavailable)"
 
 echo ""
 echo "--- 7. HTTP endpoint checks ---"
-echo -n "  Backend API /api/health: "
-if curl -sf http://localhost:8000/api/health >/dev/null 2>&1; then
+echo -n "  Backend API via Nginx proxy: "
+if curl -sf http://localhost:8088/api/health >/dev/null 2>&1; then
     echo "HEALTHY"
 else
     echo "UNREACHABLE"
