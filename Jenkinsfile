@@ -75,7 +75,7 @@ pipeline {
         always {
             echo 'Pipeline run complete.'
             // Clean up test artefacts created during the test stage.
-            sh 'rm -f test.db .coverage' || true
+            sh 'rm -f test.db .coverage || true'
         }
         failure {
             echo 'The pipeline failed. Review the stage logs above.'
